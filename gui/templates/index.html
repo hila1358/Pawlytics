@@ -1,0 +1,1277 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Pawlytics</title>
+<script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<style>
+/* ══ Design Tokens ══════════════════════════════════════════════ */
+:root {
+  --bg:        #080B13;
+  --surface:   #0E1422;
+  --card:      #121A2E;
+  --card2:     #192338;
+  --border:    #1D2B42;
+  --accent:    #FF8040;
+  --accent-d:  rgba(255,128,64,.12);
+
+  --food:  #4ADE80;
+  --water: #60A5FA;
+  --act:   #C084FC;
+
+  --ok:    #22C55E;
+  --warn:  #F59E0B;
+  --alarm: #EF4444;
+
+  --text:  #EBF0FF;
+  --muted: #586490;
+  --dim:   #182038;
+
+  --r:  16px;
+  --r2: 12px;
+  --r3:  8px;
+  --nav: 64px;
+  --hdr: 56px;
+}
+
+/* ══ Reset ══════════════════════════════════════════════════════ */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+html { background: #03050A; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  color: var(--text);
+  background: var(--bg);
+  overflow: hidden;
+  height: 100vh;
+}
+
+/* ══ App shell ══════════════════════════════════════════════════ */
+#app {
+  max-width: 430px;
+  height: 100vh;
+  height: 100dvh;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+  box-shadow: 0 0 80px rgba(0,0,0,.9);
+}
+
+/* ══ Header ═════════════════════════════════════════════════════ */
+.hdr {
+  flex-shrink: 0;
+  height: var(--hdr);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 18px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  z-index: 30;
+}
+.hdr-brand {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+/* Logo pill — white bg makes the orange collar pop on dark surfaces */
+.logo-pill {
+  background: #ffffff;
+  border-radius: 9px;
+  padding: 5px 10px;
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+}
+.hdr-logo {
+  height: 30px;
+  width: auto;
+  display: block;
+  image-rendering: -webkit-optimize-contrast;
+  image-rendering: crisp-edges;
+}
+.hdr-logo-fb {
+  font-size: 22px;
+  line-height: 1;
+  display: none;
+}
+.hdr-title {
+  font-size: 17px;
+  font-weight: 800;
+  background: linear-gradient(110deg, var(--accent), #FF5FAA);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+/* Home screen hero logo */
+.home-hero {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 8px 0 4px;
+  gap: 10px;
+}
+.home-logo-box {
+  background: #ffffff;
+  border-radius: 22px;
+  padding: 16px 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 4px 24px rgba(255,128,64,.18), 0 0 0 1px rgba(255,255,255,.06);
+}
+.home-logo-img {
+  height: 72px;
+  width: auto;
+  display: block;
+  image-rendering: -webkit-optimize-contrast;
+}
+.home-brand-name {
+  font-size: 24px;
+  font-weight: 900;
+  background: linear-gradient(110deg, var(--accent), #FF5FAA);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  letter-spacing: -.3px;
+}
+.home-brand-sub {
+  font-size: 12px;
+  color: var(--muted);
+  margin-top: -6px;
+  letter-spacing: .3px;
+}
+.conn-pill {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--card2);
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  padding: 5px 11px;
+  font-size: 11px;
+  color: var(--muted);
+}
+.cdot {
+  width: 7px; height: 7px;
+  border-radius: 50%;
+  background: var(--muted);
+  transition: background .4s, box-shadow .4s;
+}
+.cdot.live {
+  background: var(--ok);
+  box-shadow: 0 0 7px var(--ok);
+  animation: breathe 2s ease-in-out infinite;
+}
+@keyframes breathe { 0%,100%{opacity:1} 50%{opacity:.35} }
+
+/* ══ Screen container ═══════════════════════════════════════════ */
+.screens {
+  flex: 1;
+  overflow: hidden;
+  position: relative;
+}
+.screen {
+  position: absolute;
+  inset: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  -webkit-overflow-scrolling: touch;
+  padding: 16px 16px 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity .2s ease;
+}
+.screen::-webkit-scrollbar { display: none; }
+.screen.active { opacity: 1; pointer-events: all; }
+
+/* ══ Bottom nav ═════════════════════════════════════════════════ */
+.bot-nav {
+  flex-shrink: 0;
+  height: var(--nav);
+  display: flex;
+  align-items: stretch;
+  background: var(--surface);
+  border-top: 1px solid var(--border);
+  z-index: 30;
+  padding-bottom: env(safe-area-inset-bottom, 0);
+}
+.nav-btn {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--muted);
+  position: relative;
+  -webkit-tap-highlight-color: transparent;
+  transition: color .18s;
+  padding-bottom: 3px;
+}
+.nav-btn.active { color: var(--accent); }
+.nav-icon {
+  font-size: 19px;
+  line-height: 1;
+  transition: transform .15s;
+}
+.nav-btn.active .nav-icon { transform: scale(1.2); }
+.nav-lbl {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: .2px;
+}
+.nbadge {
+  position: absolute;
+  top: 7px;
+  left: 50%;
+  transform: translateX(6px);
+  min-width: 15px;
+  height: 15px;
+  border-radius: 8px;
+  background: var(--alarm);
+  color: #fff;
+  font-size: 9px;
+  font-weight: 800;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  padding: 0 3px;
+  border: 1.5px solid var(--surface);
+}
+.nbadge.on { display: flex; }
+
+/* ══ Card base ══════════════════════════════════════════════════ */
+.card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--r);
+  padding: 16px;
+}
+.sec-label {
+  font-size: 10.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .9px;
+  color: var(--muted);
+  margin-bottom: 12px;
+}
+
+/* ══ Pill badges ════════════════════════════════════════════════ */
+.pill {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .5px;
+  padding: 4px 10px;
+  border-radius: 10px;
+  white-space: nowrap;
+}
+.pill-ok   { background:rgba(34,197,94,.13); color:var(--ok);    border:1px solid rgba(34,197,94,.22); }
+.pill-warn { background:rgba(245,158,11,.13); color:var(--warn);  border:1px solid rgba(245,158,11,.22); }
+.pill-bad  { background:rgba(239,68,68,.13);  color:var(--alarm); border:1px solid rgba(239,68,68,.22); }
+.pill-dim  { background:rgba(88,100,144,.1);  color:var(--muted); border:1px solid rgba(88,100,144,.18); }
+
+/* ══ Progress bar ═══════════════════════════════════════════════ */
+.pbar {
+  height: 8px;
+  background: var(--card2);
+  border-radius: 4px;
+  overflow: hidden;
+  margin: 14px 0 6px;
+}
+.pbar-fill {
+  height: 100%;
+  border-radius: 4px;
+  transition: width .65s ease, background .4s;
+}
+.pbar-ends {
+  display: flex;
+  justify-content: space-between;
+  font-size: 10px;
+  color: var(--muted);
+}
+
+/* ══ Big value ══════════════════════════════════════════════════ */
+.bigval {
+  font-size: 62px;
+  font-weight: 900;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -2px;
+  transition: color .3s;
+}
+.bigval .unit {
+  font-size: 20px;
+  font-weight: 500;
+  color: var(--muted);
+  letter-spacing: 0;
+  margin-left: 3px;
+}
+.bigval-sub { font-size: 12px; color: var(--muted); margin-top: 4px; }
+
+/* ══ Info rows ══════════════════════════════════════════════════ */
+.irow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--border);
+}
+.irow:first-child { padding-top: 0; }
+.irow:last-child  { border-bottom: none; padding-bottom: 0; }
+.irow-k { font-size: 13px; color: var(--muted); }
+.irow-v { font-size: 13px; font-weight: 700; }
+
+/* ══ Buttons ════════════════════════════════════════════════════ */
+.btn-a {
+  width: 100%;
+  padding: 16px;
+  background: linear-gradient(135deg, #FF8040 0%, #E0521C 100%);
+  border: none;
+  border-radius: 14px;
+  color: #fff;
+  font-size: 16px;
+  font-weight: 800;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  transition: opacity .2s, transform .12s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+.btn-a:active { transform: scale(.97); opacity: .85; }
+
+.btn-b {
+  padding: 13px;
+  border: 1px solid var(--border);
+  border-radius: var(--r2);
+  background: transparent;
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  transition: border-color .2s, color .2s, background .2s;
+}
+.btn-b.sel,
+.btn-b:active {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: var(--accent-d);
+}
+.btn-b:hover { border-color: #3A4F72; }
+
+/* ══ HOME ═══════════════════════════════════════════════════════ */
+.status-card {
+  border-left: 3px solid var(--border);
+  transition: border-left-color .45s, box-shadow .45s;
+}
+.status-card.s-good  { border-left-color: var(--ok); }
+.status-card.s-warn  { border-left-color: var(--warn); box-shadow: 0 0 28px rgba(245,158,11,.08); }
+.status-card.s-alarm { border-left-color: var(--alarm); animation: apulse 1.7s ease-in-out infinite; }
+@keyframes apulse {
+  0%,100% { box-shadow: 0 0 18px rgba(239,68,68,.1); }
+  50%     { box-shadow: 0 0 38px rgba(239,68,68,.3); }
+}
+.sh {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+.sh-icon {
+  width: 52px; height: 52px;
+  border-radius: 15px;
+  background: var(--card2);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 26px;
+  flex-shrink: 0;
+}
+.sh-head {
+  font-size: 21px;
+  font-weight: 800;
+  margin-bottom: 4px;
+  transition: color .3s;
+}
+.sh-sub { font-size: 13px; color: var(--muted); line-height: 1.4; }
+
+.quick-row {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+}
+.qt {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--r2);
+  padding: 13px 10px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 5px;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  transition: border-color .2s;
+}
+.qt:active { border-color: #3A4F72; }
+.qt-ico { font-size: 18px; }
+.qt-val { font-size: 15px; font-weight: 800; transition: color .3s; }
+.qt-lbl { font-size: 10px; color: var(--muted); }
+
+.last-ev {
+  background: var(--card2);
+  border-radius: var(--r3);
+  padding: 11px 13px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 13px;
+}
+.ev-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; background: var(--muted); }
+.ev-txt { flex: 1; color: var(--muted); overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.ev-time { font-size: 11px; color: var(--muted); flex-shrink: 0; }
+
+/* ══ FOOD ═══════════════════════════════════════════════════════ */
+.feed-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--border);
+  font-size: 13px;
+}
+.feed-item:last-child { border-bottom: none; }
+.fi-dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
+.fi-type { font-weight: 600; flex: 1; }
+.fi-time { color: var(--muted); font-size: 12px; }
+.fi-empty { font-size: 13px; color: var(--muted); text-align: center; padding: 18px 0; }
+
+.mode-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+/* ══ WATER ══════════════════════════════════════════════════════ */
+.wctx {
+  border-left: 3px solid var(--water);
+  padding-left: 13px;
+  transition: border-left-color .4s;
+}
+.wctx-title { font-size: 14px; font-weight: 700; margin-bottom: 5px; }
+.wctx-body  { font-size: 13px; color: var(--muted); line-height: 1.55; }
+
+/* ══ ACTIVITY ═══════════════════════════════════════════════════ */
+.chart-wrap { position: relative; height: 90px; margin: 10px 0 6px; }
+
+.lvl-bar {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 5px;
+  margin-top: 8px;
+}
+.lvl-seg { height: 5px; border-radius: 3px; background: var(--card2); transition: background .4s; }
+
+/* ══ ALERTS ═════════════════════════════════════════════════════ */
+.filter-row { display: flex; gap: 8px; }
+.fb {
+  padding: 7px 13px;
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  transition: all .18s;
+}
+.fb.active { border-color: var(--accent); background: var(--accent-d); color: var(--accent); }
+
+.a-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 11px;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--border);
+  animation: slideUp .2s ease;
+}
+.a-item:last-child { border-bottom: none; }
+@keyframes slideUp { from{opacity:0;transform:translateY(5px)} to{opacity:1;transform:none} }
+.a-dot { width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0; margin-top: 4px; }
+.a-msg  { font-size: 13px; line-height: 1.45; }
+.a-meta { font-size: 11px; color: var(--muted); margin-top: 3px; }
+
+.a-empty {
+  text-align: center;
+  padding: 36px 0;
+  color: var(--muted);
+}
+.a-empty span { display: block; font-size: 34px; margin-bottom: 10px; }
+
+/* ══ Flash animation ════════════════════════════════════════════ */
+@keyframes flash { 0%,100%{opacity:1} 40%{opacity:.12} }
+.fl { animation: flash .3s ease; }
+</style>
+</head>
+<body>
+<div id="app">
+
+  <!-- Header -->
+  <header class="hdr">
+    <div class="hdr-brand">
+      <div class="logo-pill">
+        <img src="/static/logo.png" alt="Pawlytics" class="hdr-logo"
+             onerror="this.parentElement.style.display='none';document.getElementById('logoFb').style.display='inline'">
+      </div>
+      <span id="logoFb" class="hdr-logo-fb">🐾</span>
+      <span class="hdr-title" id="hdrTitle">Pawlytics</span>
+    </div>
+    <div class="conn-pill">
+      <div class="cdot" id="cdot"></div>
+      <span id="clabel">Connecting</span>
+    </div>
+  </header>
+
+  <!-- Screens -->
+  <div class="screens">
+
+    <!-- ── HOME ─────────────────────────────────────────────── -->
+    <div class="screen active" id="scrHome">
+
+      <!-- Brand hero -->
+      <div class="home-hero">
+        <div class="home-logo-box">
+          <img src="/static/logo.png" alt="Pawlytics" class="home-logo-img">
+        </div>
+        <div class="home-brand-name">Pawlytics</div>
+        <div class="home-brand-sub">Smart Pet Monitoring</div>
+      </div>
+
+      <!-- Pet status summary -->
+      <div class="card status-card" id="statusCard">
+        <div class="sh">
+          <div class="sh-icon" id="shIcon">🐾</div>
+          <div>
+            <div class="sh-head" id="shHead">Loading…</div>
+            <div class="sh-sub"  id="shSub">Connecting to sensors</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Quick sensor tiles (tap = navigate to screen) -->
+      <div class="quick-row">
+        <div class="qt" onclick="goTo('Food')">
+          <span class="qt-ico">🍖</span>
+          <span class="qt-val" id="qt-f" style="color:var(--food)">--</span>
+          <span class="qt-lbl">Food</span>
+        </div>
+        <div class="qt" onclick="goTo('Water')">
+          <span class="qt-ico">💧</span>
+          <span class="qt-val" id="qt-w" style="color:var(--water)">--</span>
+          <span class="qt-lbl">Water</span>
+        </div>
+        <div class="qt" onclick="goTo('Activity')">
+          <span class="qt-ico">🐕</span>
+          <span class="qt-val" id="qt-a" style="color:var(--act);font-size:12px">--</span>
+          <span class="qt-lbl">Activity</span>
+        </div>
+      </div>
+
+      <!-- Last event -->
+      <div>
+        <div class="sec-label">Last Event</div>
+        <div class="card" style="padding:12px 14px">
+          <div class="last-ev">
+            <div class="ev-dot" id="evDot"></div>
+            <span class="ev-txt" id="evTxt">No events yet</span>
+            <span class="ev-time" id="evTime"></span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Quick controls -->
+      <div class="card">
+        <div class="irow">
+          <span class="irow-k">Mode</span>
+          <span class="irow-v" id="h-mode" style="color:var(--accent)">auto</span>
+        </div>
+        <div class="irow">
+          <span class="irow-k">Feeder Relay</span>
+          <span class="irow-v" id="h-feeder">OFF</span>
+        </div>
+        <div style="margin-top:14px">
+          <button class="btn-a" onclick="manualFeed()"><span>🍽️</span> Feed Now</button>
+        </div>
+      </div>
+
+    </div><!-- /Home -->
+
+    <!-- ── FOOD ──────────────────────────────────────────────── -->
+    <div class="screen" id="scrFood">
+
+      <div class="card">
+        <div style="display:flex;align-items:flex-start;justify-content:space-between">
+          <div>
+            <div class="bigval" id="f-val" style="color:var(--food)">--<span class="unit">%</span></div>
+            <div class="bigval-sub">bowl fill level</div>
+          </div>
+          <span class="pill pill-dim" id="f-pill">--</span>
+        </div>
+        <div class="pbar"><div class="pbar-fill" id="f-bar" style="width:0%;background:var(--food)"></div></div>
+        <div class="pbar-ends"><span>Empty</span><span>Full</span></div>
+      </div>
+
+      <div class="card">
+        <div class="sec-label">Status</div>
+        <div class="irow">
+          <span class="irow-k">Level</span>
+          <span class="irow-v" id="f-slabel">--</span>
+        </div>
+        <div class="irow">
+          <span class="irow-k">Last fed</span>
+          <span class="irow-v" id="f-lastfed">Not yet</span>
+        </div>
+        <div class="irow">
+          <span class="irow-k">Auto-feed</span>
+          <span class="irow-v" id="f-automode">--</span>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="sec-label">Feed History</div>
+        <div id="f-hist"><div class="fi-empty">No feeds recorded yet</div></div>
+      </div>
+
+      <button class="btn-a" onclick="manualFeed()"><span>🍽️</span> Feed Now</button>
+
+      <div class="mode-row">
+        <button class="btn-b" id="btnAuto"   onclick="setMode('auto')"   style="flex:1">⚡ Auto</button>
+        <button class="btn-b" id="btnManual" onclick="setMode('manual')" style="flex:1">✋ Manual</button>
+      </div>
+
+    </div><!-- /Food -->
+
+    <!-- ── WATER ─────────────────────────────────────────────── -->
+    <div class="screen" id="scrWater">
+
+      <div class="card">
+        <div style="display:flex;align-items:flex-start;justify-content:space-between">
+          <div>
+            <div class="bigval" id="w-val" style="color:var(--water)">--<span class="unit">%</span></div>
+            <div class="bigval-sub">bowl fill level</div>
+          </div>
+          <span class="pill pill-dim" id="w-pill">--</span>
+        </div>
+        <div class="pbar"><div class="pbar-fill" id="w-bar" style="width:0%;background:var(--water)"></div></div>
+        <div class="pbar-ends"><span>Empty</span><span>Full</span></div>
+      </div>
+
+      <div class="card">
+        <div class="sec-label">Status</div>
+        <div class="irow">
+          <span class="irow-k">Level</span>
+          <span class="irow-v" id="w-slabel">--</span>
+        </div>
+        <div class="irow">
+          <span class="irow-k">Last refill</span>
+          <span class="irow-v" id="w-refill">Not recorded</span>
+        </div>
+        <div class="irow">
+          <span class="irow-k">Trend</span>
+          <span class="irow-v" id="w-trend">--</span>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="sec-label">What this means</div>
+        <div class="wctx" id="wctx">
+          <div class="wctx-title" id="wctx-title">Checking…</div>
+          <div class="wctx-body"  id="wctx-body">Reading water sensor.</div>
+        </div>
+      </div>
+
+      <button class="btn-b" onclick="markRefilled()" style="width:100%">✓ &nbsp;Mark as Refilled</button>
+
+    </div><!-- /Water -->
+
+    <!-- ── ACTIVITY ──────────────────────────────────────────── -->
+    <div class="screen" id="scrActivity">
+
+      <div class="card">
+        <div style="display:flex;align-items:flex-start;justify-content:space-between">
+          <div>
+            <div class="bigval" id="a-val" style="color:var(--act)">
+              --<span class="unit" style="font-size:16px"> moves</span>
+            </div>
+            <div class="bigval-sub">per interval</div>
+          </div>
+          <span class="pill pill-dim" id="a-pill">--</span>
+        </div>
+        <div class="chart-wrap"><canvas id="actChart"></canvas></div>
+        <div class="lvl-bar">
+          <div class="lvl-seg" id="ls0"></div>
+          <div class="lvl-seg" id="ls1"></div>
+          <div class="lvl-seg" id="ls2"></div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="sec-label">Details</div>
+        <div class="irow">
+          <span class="irow-k">Status</span>
+          <span class="irow-v" id="a-slabel">--</span>
+        </div>
+        <div class="irow">
+          <span class="irow-k">Last active</span>
+          <span class="irow-v" id="a-lastact">--</span>
+        </div>
+        <div class="irow">
+          <span class="irow-k">Level</span>
+          <span class="irow-v" id="a-level">--</span>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="sec-label">What this means</div>
+        <div>
+          <div style="font-size:14px;font-weight:700;margin-bottom:6px" id="a-mhead">--</div>
+          <div style="font-size:13px;color:var(--muted);line-height:1.55" id="a-mbody">--</div>
+        </div>
+      </div>
+
+    </div><!-- /Activity -->
+
+    <!-- ── ALERTS ────────────────────────────────────────────── -->
+    <div class="screen" id="scrAlerts">
+
+      <div class="filter-row">
+        <button class="fb active" id="fb-all"  onclick="setFilter('all')">All</button>
+        <button class="fb"        id="fb-warn" onclick="setFilter('warning')">⚠️ Warnings</button>
+        <button class="fb"        id="fb-alrm" onclick="setFilter('alarm')">🚨 Alarms</button>
+      </div>
+
+      <div class="card">
+        <div id="aList">
+          <div class="a-empty"><span>🔔</span>No events yet</div>
+        </div>
+      </div>
+
+    </div><!-- /Alerts -->
+
+  </div><!-- /screens -->
+
+  <!-- Bottom nav -->
+  <nav class="bot-nav">
+    <button class="nav-btn active" id="navHome"     onclick="goTo('Home')">
+      <span class="nav-icon">🏠</span><span class="nav-lbl">Home</span>
+    </button>
+    <button class="nav-btn"        id="navFood"     onclick="goTo('Food')">
+      <span class="nav-icon">🍖</span><span class="nav-lbl">Food</span>
+    </button>
+    <button class="nav-btn"        id="navWater"    onclick="goTo('Water')">
+      <span class="nav-icon">💧</span><span class="nav-lbl">Water</span>
+    </button>
+    <button class="nav-btn"        id="navActivity" onclick="goTo('Activity')">
+      <span class="nav-icon">🐕</span><span class="nav-lbl">Activity</span>
+    </button>
+    <button class="nav-btn"        id="navAlerts"   onclick="goTo('Alerts')">
+      <span class="nav-icon">🔔</span><span class="nav-lbl">Alerts</span>
+      <span class="nbadge" id="abadge"></span>
+    </button>
+  </nav>
+
+</div><!-- /app -->
+
+<script>
+// ══════════════════════════════════════════════════════════════
+// CONFIG
+// ══════════════════════════════════════════════════════════════
+const T = {
+  food:        "pawlytics/sensors/food",
+  activity:    "pawlytics/sensors/activity",
+  water:       "pawlytics/sensors/water",
+  feed_button: "pawlytics/actuators/input/feed_button",
+  mode:        "pawlytics/actuators/input/mode",
+  feeder:      "pawlytics/actuators/output/feeder",
+  alert:       "pawlytics/actuators/output/alert",
+  alerts:      "pawlytics/alerts",
+};
+const TH = { FOOD_LOW:20, FOOD_CRIT:10, WATER_LOW:25, WATER_CRIT:10, ACT_LOW:5 };
+
+// ══════════════════════════════════════════════════════════════
+// STATE
+// ══════════════════════════════════════════════════════════════
+const S = {
+  food:  { v:null, s:'unknown' },
+  water: { v:null, s:'unknown', prev:null, refillAt:null },
+  act:   { v:null, s:'unknown', lastActiveAt:null },
+  feeder: 'off',
+  mode: 'auto',
+  lastFeedAt: null,
+  feedHistory: [],
+  allAlerts: [],
+  unread: 0,
+  filter: 'all',
+  lastEvLevel: null,
+  lastEvMsg: null,
+  lastEvAt: null,
+};
+
+let curScreen = 'Home';
+let manualPending = false;
+
+// ══════════════════════════════════════════════════════════════
+// ACTIVITY CHART
+// ══════════════════════════════════════════════════════════════
+const actHist = new Array(24).fill(0);
+const actChart = new Chart(
+  document.getElementById('actChart').getContext('2d'), {
+  type: 'line',
+  data: {
+    labels: actHist.map(()=>''),
+    datasets: [{
+      data: [...actHist],
+      borderColor: 'rgba(192,132,252,.8)',
+      backgroundColor: 'rgba(192,132,252,.07)',
+      borderWidth: 2, pointRadius: 0, tension: 0.45, fill: true,
+    }]
+  },
+  options: {
+    animation: false, responsive: true, maintainAspectRatio: false,
+    plugins: { legend:{display:false}, tooltip:{enabled:false} },
+    scales: { x:{display:false}, y:{display:false, min:0, max:42} }
+  }
+});
+
+function pushAct(v) {
+  actHist.push(v); actHist.shift();
+  actChart.data.datasets[0].data = [...actHist];
+  const c = v < TH.ACT_LOW ? 'rgba(245,158,11,.8)' : 'rgba(192,132,252,.8)';
+  actChart.data.datasets[0].borderColor = c;
+  actChart.data.datasets[0].backgroundColor = c.replace('.8',',.07');
+  actChart.update('none');
+}
+
+// ══════════════════════════════════════════════════════════════
+// HELPERS
+// ══════════════════════════════════════════════════════════════
+function ago(ts) {
+  if (!ts) return '--';
+  const s = Math.floor((Date.now()-ts)/1000);
+  if (s < 10) return 'Just now';
+  if (s < 60) return s + 's ago';
+  const m = Math.floor(s/60);
+  if (m < 60) return m + 'm ago';
+  return Math.floor(m/60) + 'h ago';
+}
+function fmt(ts) {
+  if (!ts) return '--';
+  return new Date(ts).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'});
+}
+function fl(el) {
+  if (!el) return;
+  el.classList.remove('fl'); void el.offsetWidth; el.classList.add('fl');
+}
+function sc(s) {
+  return {good:'var(--ok)',low:'var(--warn)',critical:'var(--alarm)',
+          active:'var(--act)',inactive:'var(--warn)',unknown:'var(--muted)',
+          alarm:'var(--alarm)',warning:'var(--warn)'}[s]||'var(--muted)';
+}
+function pc(s) {
+  if (['good','active'].includes(s))    return 'pill pill-ok';
+  if (['low','inactive'].includes(s))   return 'pill pill-warn';
+  if (['critical','alarm'].includes(s)) return 'pill pill-bad';
+  return 'pill pill-dim';
+}
+function dotC(lv) {
+  return {alarm:'var(--alarm)',warning:'var(--warn)',event:'var(--ok)',
+          info:'var(--water)',system:'var(--muted)'}[lv]||'var(--muted)';
+}
+
+// Status classifiers
+function fSt(v) { return v===null?'unknown': v<=TH.FOOD_CRIT?'critical': v<=TH.FOOD_LOW?'low':'good'; }
+function wSt(v) { return v===null?'unknown': v<=TH.WATER_CRIT?'critical': v<=TH.WATER_LOW?'low':'good'; }
+function aSt(v) { return v===null?'unknown': v>=TH.ACT_LOW?'active':'inactive'; }
+
+function fLbl(s) { return {good:'Good',low:'Low',critical:'Critical',unknown:'--'}[s]||s; }
+function wLbl(s) { return {good:'Normal',low:'Low',critical:'Critical',unknown:'--'}[s]||s; }
+function aLbl(s) { return {active:'Active',inactive:'Resting',unknown:'--'}[s]||s; }
+
+function overall() {
+  if (S.food.s==='critical'||S.water.s==='critical') return 'alarm';
+  if (S.act.s==='inactive') return 'alarm';
+  if (S.food.s==='low'||S.water.s==='low') return 'warning';
+  if (S.food.v===null) return 'unknown';
+  return 'good';
+}
+
+// ══════════════════════════════════════════════════════════════
+// NAVIGATION
+// ══════════════════════════════════════════════════════════════
+const SCREENS = ['Home','Food','Water','Activity','Alerts'];
+const TITLES = {
+  Home:'Pawlytics', Food:'Food Bowl',
+  Water:'Water Bowl', Activity:'Pet Activity', Alerts:'Alerts'
+};
+
+function goTo(name) {
+  if (curScreen === name) return;
+  document.getElementById('scr'+curScreen).classList.remove('active');
+  document.getElementById('scr'+name).classList.add('active');
+  SCREENS.forEach(s=>document.getElementById('nav'+s).classList.toggle('active', s===name));
+  document.getElementById('hdrTitle').textContent = TITLES[name];
+  curScreen = name;
+
+  if (name === 'Alerts') {
+    S.unread = 0;
+    document.getElementById('abadge').classList.remove('on');
+  }
+  if (name === 'Activity') setTimeout(()=>actChart.resize(), 50);
+}
+
+// ══════════════════════════════════════════════════════════════
+// HOME SCREEN
+// ══════════════════════════════════════════════════════════════
+function refreshHome() {
+  const ov = overall();
+  const card = document.getElementById('statusCard');
+  card.className = 'card status-card '+({good:'s-good',warning:'s-warn',alarm:'s-alarm'}[ov]||'');
+
+  const icons = {good:'🐾',warning:'⚠️',alarm:'🚨',unknown:'🐾'};
+  const heads = {
+    good:'Pet is OK',
+    warning: (() => {
+      if (S.food.s==='low'&&S.water.s==='low') return 'Food & water are low';
+      if (S.food.s==='low')  return 'Food is running low';
+      if (S.water.s==='low') return 'Water is running low';
+      if (S.act.s==='inactive') return 'Pet seems inactive';
+      return 'Attention needed';
+    })(),
+    alarm: (() => {
+      if (S.food.s==='critical')  return 'Food critically low!';
+      if (S.water.s==='critical') return 'Water critically low!';
+      if (S.act.s==='inactive')   return 'Pet inactive too long!';
+      return 'Immediate attention!';
+    })(),
+    unknown: 'Loading…'
+  };
+  const subs = {
+    good:    'Everything looks good right now.',
+    warning: 'Some things need your attention.',
+    alarm:   'Please check on your pet immediately.',
+    unknown: 'Connecting to sensors…'
+  };
+
+  document.getElementById('shIcon').textContent = icons[ov];
+  const h = document.getElementById('shHead');
+  h.textContent = heads[ov]||'';
+  h.style.color = sc(ov==='good'?'good': ov==='warning'?'low':'critical');
+  document.getElementById('shSub').textContent = subs[ov]||'';
+
+  // Quick tiles
+  if (S.food.v!==null) {
+    const q = document.getElementById('qt-f');
+    q.textContent = S.food.v+'%'; q.style.color = sc(S.food.s);
+  }
+  if (S.water.v!==null) {
+    const q = document.getElementById('qt-w');
+    q.textContent = S.water.v+'%'; q.style.color = sc(S.water.s);
+  }
+  if (S.act.v!==null) {
+    const q = document.getElementById('qt-a');
+    q.textContent = aLbl(S.act.s);
+    q.style.color = S.act.s==='active'?'var(--act)':'var(--warn)';
+  }
+}
+
+function setLastEv(level, msg) {
+  S.lastEvLevel=level; S.lastEvMsg=msg; S.lastEvAt=Date.now();
+  document.getElementById('evDot').style.background = dotC(level);
+  document.getElementById('evTxt').textContent = msg;
+  document.getElementById('evTime').textContent = 'Just now';
+}
+
+// ══════════════════════════════════════════════════════════════
+// FOOD SCREEN
+// ══════════════════════════════════════════════════════════════
+function onFood(v) {
+  S.food.v=v; S.food.s=fSt(v);
+  const c = sc(S.food.s);
+
+  const el = document.getElementById('f-val');
+  el.childNodes[0].textContent = v; el.style.color = c; fl(el);
+  const bar = document.getElementById('f-bar');
+  bar.style.width=v+'%'; bar.style.background=c;
+  const pill = document.getElementById('f-pill');
+  pill.className=pc(S.food.s); pill.textContent=fLbl(S.food.s);
+
+  const sl = {good:'✓ Good',low:'⚡ Low — refill soon',critical:'🚨 Critical — feed now',unknown:'--'};
+  const slEl = document.getElementById('f-slabel');
+  slEl.textContent = sl[S.food.s]||'--'; slEl.style.color = c;
+  document.getElementById('f-lastfed').textContent = S.lastFeedAt ? ago(S.lastFeedAt) : 'Not yet';
+  document.getElementById('f-automode').textContent = S.mode==='auto'?'Enabled':'Disabled';
+
+  refreshHome();
+}
+
+function onFeeder(state) {
+  S.feeder = state;
+  const on = state==='on';
+  if (on) {
+    S.lastFeedAt = Date.now();
+    if (!manualPending) {
+      // Auto-triggered
+      S.feedHistory.unshift({ts:Date.now(), type:'auto'});
+      if (S.feedHistory.length>10) S.feedHistory.pop();
+      renderHistory();
+    }
+    manualPending = false;
+    document.getElementById('f-lastfed').textContent = 'Just now';
+  }
+  document.getElementById('h-feeder').textContent = on?'ON':'OFF';
+  document.getElementById('h-feeder').style.color = on?'var(--alarm)':'var(--ok)';
+}
+
+function renderHistory() {
+  const el = document.getElementById('f-hist');
+  if (!S.feedHistory.length) {
+    el.innerHTML = '<div class="fi-empty">No feeds recorded yet</div>';
+    return;
+  }
+  el.innerHTML = S.feedHistory.map(f =>
+    `<div class="feed-item">
+      <div class="fi-dot" style="background:${f.type==='manual'?'var(--accent)':'var(--food)'}"></div>
+      <span class="fi-type">${f.type==='manual'?'Manual feed':'Auto-feed'}</span>
+      <span class="fi-time">${fmt(f.ts)}</span>
+    </div>`
+  ).join('');
+}
+
+// ══════════════════════════════════════════════════════════════
+// WATER SCREEN
+// ══════════════════════════════════════════════════════════════
+function onWater(v) {
+  if (S.water.v!==null && v > S.water.v+10) {
+    S.water.refillAt = Date.now();
+    addAlert('event','Refill detected — water level increased.');
+  }
+  S.water.prev = S.water.v;
+  S.water.v=v; S.water.s=wSt(v);
+  const c = sc(S.water.s);
+
+  const el = document.getElementById('w-val');
+  el.childNodes[0].textContent=v; el.style.color=c; fl(el);
+  const bar = document.getElementById('w-bar');
+  bar.style.width=v+'%'; bar.style.background=c;
+  const pill = document.getElementById('w-pill');
+  pill.className=pc(S.water.s); pill.textContent=wLbl(S.water.s);
+
+  const sl = {good:'✓ Normal',low:'💧 Low — refill soon',critical:'🚨 Critical — refill now',unknown:'--'};
+  const slEl = document.getElementById('w-slabel');
+  slEl.textContent=sl[S.water.s]||'--'; slEl.style.color=c;
+
+  document.getElementById('w-refill').textContent = S.water.refillAt?ago(S.water.refillAt):'Not recorded';
+
+  const trend = S.water.prev!==null
+    ? (v<S.water.prev?'↓ Decreasing': v>S.water.prev?'↑ Increasing':'→ Stable') : '--';
+  document.getElementById('w-trend').textContent = trend;
+
+  const ctxT = {good:'Water is adequate',low:`Below ${TH.WATER_LOW}% — refill soon`,
+                critical:`Below ${TH.WATER_CRIT}% — refill immediately!`,unknown:'Reading sensor…'};
+  const ctxB = {
+    good:'Your pet has enough water. Normal consumption detected.',
+    low:'Your pet could run out soon. Please refill the water bowl.',
+    critical:'The bowl is almost empty. Dehydration risk — refill immediately.',
+    unknown:'Waiting for sensor data.'
+  };
+  document.getElementById('wctx-title').textContent = ctxT[S.water.s]||'';
+  document.getElementById('wctx-body').textContent  = ctxB[S.water.s]||'';
+  document.getElementById('wctx').style.borderLeftColor = c;
+
+  refreshHome();
+}
+
+function markRefilled() {
+  S.water.refillAt = Date.now();
+  document.getElementById('w-refill').textContent = 'Just now';
+  addAlert('event','Water bowl marked as refilled by owner.');
+}
+
+// ══════════════════════════════════════════════════════════════
+// ACTIVITY SCREEN
+// ══════════════════════════════════════════════════════════════
+function onActivity(v) {
+  S.act.v=v; S.act.s=aSt(v);
+  if (S.act.s==='active') S.act.lastActiveAt=Date.now();
+
+  const c = S.act.s==='active'?'var(--act)':'var(--warn)';
+  const el = document.getElementById('a-val');
+  el.childNodes[0].textContent=v; el.style.color=c; fl(el);
+
+  const pill = document.getElementById('a-pill');
+  pill.className=pc(S.act.s==='active'?'good':'low');
+  pill.textContent=aLbl(S.act.s);
+
+  // 3-segment level bar
+  const lvl = v>=20?2: v>=TH.ACT_LOW?1:0;
+  const segC = ['var(--alarm)','var(--warn)','var(--ok)'];
+  [0,1,2].forEach(i=>{
+    document.getElementById('ls'+i).style.background = i<=lvl ? segC[lvl] : 'var(--card2)';
+  });
+
+  const slLbls = {active:v>=20?'🏃 Very active':'✓ Active',inactive:'💤 Resting',unknown:'--'};
+  const slEl = document.getElementById('a-slabel');
+  slEl.textContent=slLbls[S.act.s]||'--'; slEl.style.color=c;
+  document.getElementById('a-lastact').textContent = S.act.lastActiveAt?ago(S.act.lastActiveAt):'--';
+  document.getElementById('a-level').textContent = v>=20?'High':v>=TH.ACT_LOW?'Normal':'Low';
+
+  const mH = {active:v>=20?'Pet is very active!':'Normal activity',inactive:'Pet appears to be resting',unknown:'Waiting…'};
+  const mB = {
+    active:'Your pet is moving normally. No concerns right now.',
+    inactive:`Movement below ${TH.ACT_LOW} per interval. This is normal during rest. If it persists for a long time, consider checking on your pet.`,
+    unknown:'Reading sensor data…'
+  };
+  document.getElementById('a-mhead').textContent=mH[S.act.s]||'';
+  document.getElementById('a-mbody').textContent=mB[S.act.s]||'';
+
+  pushAct(v);
+  refreshHome();
+}
+
+// ══════════════════════════════════════════════════════════════
+// ALERTS
+// ══════════════════════════════════════════════════════════════
+function addAlert(level, msg) {
+  S.allAlerts.unshift({level, msg, ts:Date.now()});
+  if (S.allAlerts.length>120) S.allAlerts.pop();
+
+  setLastEv(level, msg);
+
+  if (curScreen!=='Alerts' && (level==='alarm'||level==='warning')) {
+    S.unread++;
+    const b = document.getElementById('abadge');
+    b.textContent = S.unread>9?'9+':S.unread;
+    b.classList.add('on');
+  }
+  if (curScreen==='Alerts') renderAlerts();
+}
+
+function setFilter(f) {
+  S.filter=f;
+  ['all','warn','alrm'].forEach(id=>document.getElementById('fb-'+id).classList.remove('active'));
+  const map={all:'all',warning:'warn',alarm:'alrm'};
+  document.getElementById('fb-'+(map[f]||f)).classList.add('active');
+  renderAlerts();
+}
+
+function renderAlerts() {
+  const list = document.getElementById('aList');
+  let items = S.allAlerts;
+  if (S.filter!=='all') items=items.filter(a=>a.level===S.filter);
+
+  if (!items.length) {
+    list.innerHTML='<div class="a-empty"><span>🔔</span>No events yet</div>';
+    return;
+  }
+  const dotMap={alarm:'var(--alarm)',warning:'var(--warn)',event:'var(--ok)',
+                info:'var(--water)',system:'var(--muted)'};
+  const tagMap={alarm:'ALARM',warning:'WARN',event:'EVENT',info:'INFO',system:'SYS'};
+  list.innerHTML = items.map(a=>
+    `<div class="a-item">
+      <div class="a-dot" style="background:${dotMap[a.level]||'var(--muted)'}"></div>
+      <div>
+        <div class="a-msg">${a.msg}</div>
+        <div class="a-meta">${tagMap[a.level]||a.level.toUpperCase()} · ${ago(a.ts)}</div>
+      </div>
+    </div>`
+  ).join('');
+}
+
+// ══════════════════════════════════════════════════════════════
+// MODE & CONTROLS
+// ══════════════════════════════════════════════════════════════
+function onMode(m) {
+  S.mode = m;
+  document.getElementById('h-mode').textContent = m;
+  document.getElementById('f-automode').textContent = m==='auto'?'Enabled':'Disabled';
+  document.getElementById('btnAuto').classList.toggle('sel',   m==='auto');
+  document.getElementById('btnManual').classList.toggle('sel', m==='manual');
+}
+
+function manualFeed() {
+  manualPending = true;
+  S.feedHistory.unshift({ts:Date.now(), type:'manual'});
+  if (S.feedHistory.length>10) S.feedHistory.pop();
+  S.lastFeedAt = Date.now();
+  renderHistory();
+  document.getElementById('f-lastfed').textContent = 'Just now';
+  client.publish(T.feed_button, JSON.stringify({action:'feed', timestamp:Date.now()/1e3}));
+  addAlert('event','Manual feed triggered.');
+}
+
+function setMode(m) {
+  client.publish(T.mode, JSON.stringify({mode:m, timestamp:Date.now()/1e3}));
+  onMode(m);
+  addAlert('event','Mode switched to: '+m);
+}
+
+// ══════════════════════════════════════════════════════════════
+// MQTT
+// ══════════════════════════════════════════════════════════════
+const clientId = 'pawlytics-' + Math.random().toString(36).slice(2,8);
+const client = mqtt.connect('ws://broker.hivemq.com:8000/mqtt', {
+  clientId, keepalive:60, reconnectPeriod:4000, connectTimeout:12000,
+});
+
+client.on('connect', () => {
+  document.getElementById('cdot').classList.add('live');
+  document.getElementById('clabel').textContent = 'Live';
+  Object.values(T).forEach(t=>client.subscribe(t));
+  addAlert('system','Connected to MQTT broker.');
+});
+client.on('reconnect', ()=>{
+  document.getElementById('cdot').classList.remove('live');
+  document.getElementById('clabel').textContent = 'Reconnecting…';
+});
+client.on('offline', ()=>addAlert('system','Connection lost.'));
+client.on('error',  e=>addAlert('system','Error: '+e.message));
+
+client.on('message', (topic, raw)=>{
+  let p; try{p=JSON.parse(raw.toString());}catch{return;}
+  switch(topic){
+    case T.food:     onFood(p.value);                          break;
+    case T.water:    onWater(p.value);                         break;
+    case T.activity: onActivity(p.value);                      break;
+    case T.feeder:   onFeeder(p.state||'off');                 break;
+    case T.alerts:   addAlert(p.level||'info', p.message||''); break;
+    case T.mode:     onMode(p.mode||'auto');                   break;
+  }
+});
+
+// Refresh "time ago" every 30 s
+setInterval(()=>{
+  if (S.lastFeedAt)         document.getElementById('f-lastfed').textContent   = ago(S.lastFeedAt);
+  if (S.act.lastActiveAt)   document.getElementById('a-lastact').textContent   = ago(S.act.lastActiveAt);
+  if (S.water.refillAt)     document.getElementById('w-refill').textContent    = ago(S.water.refillAt);
+  if (S.lastEvAt)           document.getElementById('evTime').textContent      = ago(S.lastEvAt);
+  if (curScreen==='Alerts') renderAlerts();
+}, 30000);
+
+// Init visual state
+onMode('auto');
+renderHistory();
+</script>
+</body>
+</html>

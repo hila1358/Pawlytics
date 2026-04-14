@@ -1,0 +1,3 @@
+db/pawlytics.db
+__pycache__/
+*.pyc
