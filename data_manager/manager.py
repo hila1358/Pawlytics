@@ -95,6 +95,15 @@ class PawlyticsManager:
         self.alert_cooldown = 30
         self.last_alert_time = {}
 
+        self._handlers = {
+            TOPICS["food"]:        self.handle_food,
+            TOPICS["activity"]:    self.handle_activity,
+            TOPICS["water"]:       self.handle_water,
+            TOPICS["feed_button"]: self.handle_feed_button,
+            TOPICS["mode"]:        self.handle_mode,
+        }
+        self._feeder_lock = threading.Lock()
+
     def on_connect(self, client, userdata, flags, rc):
         print(f"[Manager] Connected to broker (rc={rc})")
         for key in ("food", "activity", "water", "feed_button", "mode"):
@@ -108,14 +117,7 @@ class PawlyticsManager:
             return
 
         topic = msg.topic
-        handlers = {
-            TOPICS["food"]:        self.handle_food,
-            TOPICS["activity"]:    self.handle_activity,
-            TOPICS["water"]:       self.handle_water,
-            TOPICS["feed_button"]: self.handle_feed_button,
-            TOPICS["mode"]:        self.handle_mode,
-        }
-        handler = handlers.get(topic)
+        handler = self._handlers.get(topic)
         if handler:
             handler(payload)
 
@@ -164,7 +166,10 @@ class PawlyticsManager:
     # ── Actuator commands ─────────────────────────────────────────────────────
 
     def _trigger_feeder(self, reason=""):
-        """Publish feeder ON, then schedule feeder OFF after 3 s (non-blocking)."""
+        """Publish feeder ON, then schedule feeder OFF after 3 s (non-blocking).
+        A lock prevents overlapping dispense cycles from concurrent alarm messages."""
+        if not self._feeder_lock.acquire(blocking=False):
+            return
         on_payload = json.dumps({"state": "on", "reason": reason, "timestamp": time.time()})
         self.client.publish(TOPICS["feeder"], on_payload)
         save_event("feeder_triggered", reason)
@@ -175,6 +180,7 @@ class PawlyticsManager:
             off_payload = json.dumps({"state": "off", "timestamp": time.time()})
             self.client.publish(TOPICS["feeder"], off_payload)
             print("[Manager] Feeder OFF")
+            self._feeder_lock.release()
 
         threading.Thread(target=turn_off, daemon=True).start()
 

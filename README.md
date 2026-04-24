@@ -56,7 +56,9 @@ Pawlytics/
 ├── data_manager/
 │   └── manager.py            # Subscribes to topics, writes DB, sends alerts
 ├── gui/
-│   └── dashboard.py          # Tkinter dashboard: live values + alarm log
+│   ├── dashboard.py          # Flask server — serves the web dashboard at http://localhost:5000
+│   └── templates/
+│       └── index.html        # Mobile-style single-page app (MQTT.js + Chart.js)
 ├── db/                       # Auto-created at runtime
 │   └── pawlytics.db          # SQLite database
 ├── requirements.txt
@@ -101,7 +103,7 @@ is triggered automatically.
 pip install -r requirements.txt
 ```
 
-> `tkinter` and `sqlite3` are part of the Python standard library — no extra install needed.
+> `sqlite3` is part of the Python standard library — no extra install needed.
 
 ### 2. Start an MQTT broker
 
@@ -175,6 +177,6 @@ SQLite file is created automatically at `db/pawlytics.db` when the manager start
 | **Data manager**         | `data_manager/manager.py`                        | Subscribes to broker, writes SQLite, evaluates thresholds, publishes alerts |
 | **DB writes**            | `data_manager/manager.py` + `db/pawlytics.db`    | Every reading, alert, and event persisted in SQLite        |
 | **Warning / alarm messages** | `data_manager/manager.py`                   | `send_alert()` publishes to `pawlytics/alerts` with level = warning / alarm |
-| **GUI — live data**      | `gui/dashboard.py`                               | Values update in real time from MQTT subscriptions         |
-| **GUI — device states**  | `gui/dashboard.py`                               | Feeder relay state, buzzer state, and mode shown live      |
-| **GUI — Info/Warn/Alarm log** | `gui/dashboard.py`                          | Colour-coded scrollable log: blue=info, orange=warn, red=alarm |
+| **GUI — live data**      | `gui/dashboard.py` + `gui/templates/index.html`  | Values update in real time via MQTT.js WebSocket           |
+| **GUI — device states**  | `gui/templates/index.html`                       | Feeder relay state, mode, and connection status shown live |
+| **GUI — Info/Warn/Alarm log** | `gui/templates/index.html`                  | Colour-coded alert log with filter buttons (All / Warn / Alarm) |

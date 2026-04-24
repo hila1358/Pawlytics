@@ -808,7 +808,7 @@ const T = {
   alert:       "pawlytics/actuators/output/alert",
   alerts:      "pawlytics/alerts",
 };
-const TH = { FOOD_LOW:20, FOOD_CRIT:10, WATER_LOW:25, WATER_CRIT:10, ACT_LOW:5 };
+const TH = { FOOD_LOW:20, FOOD_CRIT:10, WATER_LOW:20, WATER_CRIT:10, ACT_LOW:5 };
 
 // ══════════════════════════════════════════════════════════════
 // STATE
@@ -858,9 +858,9 @@ const actChart = new Chart(
 function pushAct(v) {
   actHist.push(v); actHist.shift();
   actChart.data.datasets[0].data = [...actHist];
-  const c = v < TH.ACT_LOW ? 'rgba(245,158,11,.8)' : 'rgba(192,132,252,.8)';
-  actChart.data.datasets[0].borderColor = c;
-  actChart.data.datasets[0].backgroundColor = c.replace('.8',',.07');
+  const low = v < TH.ACT_LOW;
+  actChart.data.datasets[0].borderColor     = low ? 'rgba(245,158,11,.8)'  : 'rgba(192,132,252,.8)';
+  actChart.data.datasets[0].backgroundColor = low ? 'rgba(245,158,11,.07)' : 'rgba(192,132,252,.07)';
   actChart.update('none');
 }
 
@@ -1124,7 +1124,6 @@ function onActivity(v) {
   pill.className=pc(S.act.s==='active'?'good':'low');
   pill.textContent=aLbl(S.act.s);
 
-  // 3-segment level bar
   const lvl = v>=20?2: v>=TH.ACT_LOW?1:0;
   const segC = ['var(--alarm)','var(--warn)','var(--ok)'];
   [0,1,2].forEach(i=>{
@@ -1185,12 +1184,10 @@ function renderAlerts() {
     list.innerHTML='<div class="a-empty"><span>🔔</span>No events yet</div>';
     return;
   }
-  const dotMap={alarm:'var(--alarm)',warning:'var(--warn)',event:'var(--ok)',
-                info:'var(--water)',system:'var(--muted)'};
   const tagMap={alarm:'ALARM',warning:'WARN',event:'EVENT',info:'INFO',system:'SYS'};
   list.innerHTML = items.map(a=>
     `<div class="a-item">
-      <div class="a-dot" style="background:${dotMap[a.level]||'var(--muted)'}"></div>
+      <div class="a-dot" style="background:${dotC(a.level)}"></div>
       <div>
         <div class="a-msg">${a.msg}</div>
         <div class="a-meta">${tagMap[a.level]||a.level.toUpperCase()} · ${ago(a.ts)}</div>
